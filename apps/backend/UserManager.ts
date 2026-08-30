@@ -1,6 +1,8 @@
 import type { WebSocket } from "ws"
 import { User } from "./User";
 import { uuid } from "uuidv4";
+import { SessionModel, WorkspaceModel } from "db";
+import type { Session, Workspace } from "commons";
 
 export class UserManager{
   private users: User[];
@@ -15,10 +17,40 @@ export class UserManager{
     return UserManager.instance;
   }
 
-  addUser(ws: WebSocket) {
+  async addUser(ws: WebSocket) {
     const id = uuid();
     const user = new User(id, ws);
     this.users.push(user);
+
+    const workspaces = await WorkspaceModel.find();
+    const sessions = await SessionModel.find();
+
+    const response: Workspace[] = [];
+
+    workspaces.forEach(w => {
+      const sesArr: Session[] = [];
+
+      sessions.forEach(s => {
+        if (s.workspace === w._id) {
+          sesArr.push({
+            id: s._id.toString(),
+            messages: s.conversation
+          })
+        }
+      })
+
+      response.push({
+        id: w._id.toString(),
+        name: w.name!,
+        path: w.path!,
+        sessions: sesArr
+      })
+    })
+    
+    ws.send(JSON.stringify({
+      type: "init",
+      workspaces: response
+    }))
 
     ws.on("message",async (msg) => {
       try{
