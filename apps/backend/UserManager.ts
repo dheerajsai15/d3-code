@@ -2,7 +2,7 @@ import type { WebSocket } from "ws"
 import { User } from "./User";
 import { uuid } from "uuidv4";
 import { SessionModel, WorkspaceModel } from "db";
-import type { Session, Workspace } from "commons";
+import type { Message, Session, Workspace } from "commons";
 
 export class UserManager{
   private users: User[];
@@ -31,10 +31,12 @@ export class UserManager{
       const sesArr: Session[] = [];
 
       sessions.forEach(s => {
-        if (s.workspace === w._id) {
+        // ObjectId instances are compared by identity with ===, which is never
+        // true for two separately-loaded documents. equals() compares the value.
+        if (s.workspace?.equals(w._id)) {
           sesArr.push({
             id: s._id.toString(),
-            messages: s.conversation
+            messages: (s.conversation ?? []) as Message[]
           })
         }
       })
@@ -55,6 +57,7 @@ export class UserManager{
     ws.on("message",async (msg) => {
       try{
         const parsedMessage = JSON.parse(msg.toString());
+        console.log(parsedMessage)
         const responsePayload = await user.handleIncomingMessage(parsedMessage);
         user.sendMessage(responsePayload)
       } catch (e) {

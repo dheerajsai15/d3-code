@@ -1,4 +1,4 @@
-import { AddMessageSchema, CreateSessionSchema, CreateWorkspaceSchema, type IncomingMessageType, type OutgoingMessageType } from "commons";
+import { AddMessageSchema, CreateSessionSchema, CreateWorkspaceSchema, type IncomingMessageType, type Message, type OutgoingMessageType } from "commons";
 import { SessionModel, WorkspaceModel } from "db";
 import type { WebSocket } from "ws";
 
@@ -20,25 +20,32 @@ export class User{
 
   async handleIncomingMessage(msg: IncomingMessageType): Promise<OutgoingMessageType> {
     if (msg.type === "create-workspace") {
-      const { success, data } = CreateWorkspaceSchema.safeParse(msg);
+      const { success, data } = CreateWorkspaceSchema.safeParse(msg.payload);
       if (!success)
         throw new Error("Incorrect Schema")
 
+      console.log("zod schema validation passed")
+
+      const name = data.path.split("/").pop()!;
       const workspace = await WorkspaceModel.create({
         path: data.path,
-        name: data.path.split("/").pop()
+        name
       });
+
+      console.log("workspace created in DB")
 
       return {
         type: "workspace-created",
         payload:{
-          id: workspace._id.toString()
+          id: workspace._id.toString(),
+          name,
+          path: data.path
         }
       }
     }
 
     if (msg.type === "create-session") {
-      const { success, data } = CreateSessionSchema.safeParse(msg);
+      const { success, data } = CreateSessionSchema.safeParse(msg.payload);
       if (!success)
         throw new Error("Incorrect Schema")
 
@@ -50,33 +57,37 @@ export class User{
       return {
         type: "session-created",
         payload:{
-          id: session._id.toString()
+          id: session._id.toString(),
+          workspaceId: data.workspaceId
         }
       }
     }
 
     if (msg.type === "add-message") {
-      const { success, data } = AddMessageSchema.safeParse(msg);
+      const { success, data } = AddMessageSchema.safeParse(msg.payload);
       if (!success)
         throw new Error("Incorrect Schema")
 
-      const message = await SessionModel.updateOne({
-        id: data.sessionId
-      }, {
-        conversation: {
-          $push: {
-            type: "user",
-            payload: {
-              message: data.message
-            }
-          }
+      const message: Message = {
+        role: "user",
+        payload: {
+          message: data.message
         }
-      });
+      };
+
+      const result = await SessionModel.updateOne(
+        { _id: data.sessionId },
+        { $push: { conversation: message } }
+      );
+
+      if (result.matchedCount === 0)
+        throw new Error("No such session");
 
       return {
-        type: "session-created",
+        type: "message-added",
         payload:{
-          id: "1"
+          sessionId: data.sessionId,
+          message
         }
       }
     }
