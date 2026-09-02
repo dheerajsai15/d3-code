@@ -1,6 +1,7 @@
 import { AddMessageSchema, CreateSessionSchema, CreateWorkspaceSchema, type IncomingMessageType, type Message, type OutgoingMessageType } from "commons";
 import { SessionModel, WorkspaceModel } from "db";
 import type { WebSocket } from "ws";
+import { query } from "@anthropic-ai/claude-agent-sdk";
 
 export class User{
   private socket: WebSocket;
@@ -75,6 +76,17 @@ export class User{
         }
       };
 
+      const session = await SessionModel.findById(data.sessionId);
+
+      if (!session) {
+        throw new Error("Session doesn't exist " + data.sessionId)
+      }
+      const workspace = await WorkspaceModel.findById(session.workspace?._id);
+
+      if (!workspace) {
+        throw new Error("Workspace doesn't exist ")
+      }
+
       const result = await SessionModel.updateOne(
         { _id: data.sessionId },
         { $push: { conversation: message } }
@@ -82,6 +94,66 @@ export class User{
 
       if (result.matchedCount === 0)
         throw new Error("No such session");
+      
+      // Agentic loop: streams messages as Claude works
+      for await (const message of query({
+        prompt: data.message,
+        options: {
+          cwd: workspace.path!,
+          allowedTools: ["Read", "Edit", "Glob"], // Auto-approve these tools
+          resume: session.anthropicSessionId ?? undefined,
+          permissionMode: "acceptEdits" // Auto-approve file edits
+        }
+      })) {
+        // Print human-readable output
+        if (message.type === "assistant" && message.message?.content) {
+          for (const block of message.message.content) {
+            if ("text" in block) {
+              console.log(block.text); // Claude's reasoning
+            } else if ("name" in block) {
+              console.log(`Tool: ${block.name}`); // Tool being called
+            }
+          }
+        } else if (message.type === "result") {
+          console.log(`Done: ${message.subtype}`); // Final result
+
+          if (!session.anthropicSessionId) {
+            session.anthropicSessionId = message.session_id;
+            await session.save();
+          }
+
+          if (message.subtype === "success") {
+            console.log(message.result);
+
+            this.sendMessage({
+              type: "message-added",
+              payload: {
+                sessionId: session._id.toString(),
+                message: {
+                  role: "assistant",
+                  payload: {
+                    message: message.result
+                  }
+                }
+              }
+            })
+
+            await SessionModel.updateOne(
+              { _id: data.sessionId },
+              {
+                $push: {
+                  conversation: {
+                    role: "assistant",
+                    payload: {
+                      message: message.result
+                    }
+                  }
+                }
+              }
+            );
+          }
+        }
+      }
 
       return {
         type: "message-added",

@@ -7,7 +7,8 @@ export const Workspace = new mongoose.Schema({
 
 export const Session = new mongoose.Schema({
   conversation: [Schema.Types.Mixed],
-  workspace: { type: Schema.Types.ObjectId, ref: 'Workspace'}
+  workspace: { type: Schema.Types.ObjectId, ref: 'Workspace' },
+  anthropicSessionId: String
 });
 
 export const SessionModel = mongoose.model("Session", Session);

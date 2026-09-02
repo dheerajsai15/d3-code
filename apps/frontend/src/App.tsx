@@ -181,7 +181,7 @@ function WorkspaceItem({ workspace, open, onToggle }: {
 }
 
 function Chat() {
-  const { socket, workspaces, activeSessionId } = useContext(AppContext);
+  const { socket, workspaces, setWorkspaces, activeSessionId } = useContext(AppContext);
   const [draft, setDraft] = useState("");
 
   const active = useMemo(() => {
@@ -200,6 +200,22 @@ function Chat() {
 
   const send = () => {
     if (!draft.trim()) return;
+    const text = draft.trim();
+
+    setWorkspaces(ws => ws.map(w => ({
+      ...w,
+      sessions: w.sessions.map(s => s.id === active.session.id
+        ? {
+          ...s,
+          messages: [...s.messages, {
+            role: "user", payload: {
+              message: text
+            }
+          }]
+        } : s
+      )
+    })))
+    
     socket.send(JSON.stringify({
       type: "add-message",
       payload: { sessionId: active.session.id, message: draft.trim() }
