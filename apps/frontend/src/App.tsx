@@ -1,6 +1,7 @@
 import { useContext, useEffect, useMemo, useState } from 'react';
 import { AppContext } from './context/AppContext';
 import { useSocket } from './hooks/useSocket'
+import { Markdown } from './components/Markdown';
 import type { Workspace } from 'commons';
 
 function App() {
@@ -237,13 +238,15 @@ function Chat() {
       )}
       {active.session.messages.map((m, i) => (
         <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-          <div className={`max-w-[75%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap ${
-            m.role === "user"
-              ? "bg-neutral-100 text-neutral-900"
-              : "bg-neutral-800 text-neutral-200"
-          }`}>
-            {m.payload.message}
-          </div>
+          {m.role === "user" ? (
+            <div className="max-w-[75%] rounded-lg bg-neutral-100 px-3 py-2 text-sm whitespace-pre-wrap text-neutral-900">
+              {m.payload.message}
+            </div>
+          ) : (
+            <div className="max-w-[75%] rounded-lg bg-neutral-800 px-3 py-2 text-neutral-200">
+              <Markdown>{m.payload.message}</Markdown>
+            </div>
+          )}
         </div>
       ))}
     </div>

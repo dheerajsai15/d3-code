@@ -59,7 +59,8 @@ export class UserManager{
         const parsedMessage = JSON.parse(msg.toString());
         console.log(parsedMessage)
         const responsePayload = await user.handleIncomingMessage(parsedMessage);
-        //user.sendMessage(responsePayload)
+        if(responsePayload.type != "message-added")
+          user.sendMessage(responsePayload)
       } catch (e) {
         
         console.error(`User sent non JSON format input`)
