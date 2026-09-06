@@ -1,7 +1,7 @@
-import { AddMessageSchema, CreateSessionSchema, CreateWorkspaceSchema, type IncomingMessageType, type Message, type OutgoingMessageType } from "commons";
+import { AddMessageSchema, CreateSessionSchema, CreateWorkspaceSchema, DeleteSessionSchema, type IncomingMessageType, type Message, type OutgoingMessageType } from "commons";
 import { SessionModel, WorkspaceModel } from "db";
 import type { WebSocket } from "ws";
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import { deleteSession, query } from "@anthropic-ai/claude-agent-sdk";
 
 // Tool inputs come off the SDK typed as `unknown`, so every read is narrowed.
 function readString(input: Record<string, unknown>, key: string): string | undefined {
@@ -162,6 +162,47 @@ export class User{
         payload:{
           id: session._id.toString(),
           workspaceId: data.workspaceId
+        }
+      }
+    }
+
+    if (msg.type === "delete-session") {
+      const { success, data } = DeleteSessionSchema.safeParse(msg.payload)
+      if (!success)
+        throw new Error("Incorrect Schema")
+
+      // Read it first: the response needs the workspace it belonged to, and the
+      // agent transcript can only be located via anthropicSessionId.
+      const session = await SessionModel.findById(data.sessionId);
+
+      if (!session)
+        throw new Error("Session doesn't exist " + data.sessionId);
+
+      const workspaceId = session.workspace?.toString();
+
+      if (!workspaceId)
+        throw new Error("Session has no workspace " + data.sessionId);
+
+      // Anthropic stores no history server-side — the agent SDK keeps it in a
+      // local JSONL transcript, so dropping only the Mongo document would
+      // orphan that file (plus any subagent transcripts) forever.
+      if (session.anthropicSessionId) {
+        try {
+          await deleteSession(session.anthropicSessionId);
+        } catch (e) {
+          // Throws when the transcript is already gone. Not a reason to leave
+          // the session in the database.
+          console.warn(`No transcript to delete for ${session.anthropicSessionId}`);
+        }
+      }
+
+      await SessionModel.deleteOne({ _id: data.sessionId });
+
+      return {
+        type: "session-deleted",
+        payload: {
+          id: data.sessionId,
+          workspaceId
         }
       }
     }

@@ -13,6 +13,12 @@ export const SessionCreatedSchema = z.object({
 })
 export type SessionCreatedSchemaType = z.infer<typeof SessionCreatedSchema>
 
+export const SessionDeletedSchema = z.object({
+  id: z.string(),
+  workspaceId: z.string()
+})
+export type SessionDeletedSchemaType = z.infer<typeof SessionDeletedSchema>
+
 export const MessageSchema = z.object({
   role: z.enum(["user", "assistant"]),
   payload: z.object({
@@ -33,6 +39,9 @@ export type OutgoingMessageType = {
 } | {
   type: "session-created"
   payload: SessionCreatedSchemaType
+} | {
+  type: "session-deleted"
+  payload: SessionDeletedSchemaType
 } | {
   type: "message-added"
   payload: MessageAddedSchemaType

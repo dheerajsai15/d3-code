@@ -11,6 +11,11 @@ export const CreateSessionSchema = z.object({
 })
 export type CreateSessionSchemaType = z.infer<typeof CreateSessionSchema>
 
+export const DeleteSessionSchema = z.object({
+  sessionId: z.string()
+})
+export type DeleteSessionSchemaType = z.infer<typeof DeleteSessionSchema>
+
 export const ModelSchema = z.enum(MODEL_VALUES)
 
 export const AddMessageSchema = z.object({
@@ -31,4 +36,7 @@ export type IncomingMessageType = {
 } | {
   type: "add-message"
   payload: AddMessageSchemaType
+} | {
+  type: "delete-session"
+  payload: DeleteSessionSchemaType
 };

@@ -34,6 +34,16 @@ function App() {
         setActiveSessionId(id);
       }
 
+      if (data.type === "session-deleted") {
+        const { id, workspaceId } = data.payload;
+        setWorkspaces(ws => ws.map(w => w.id === workspaceId
+          ? { ...w, sessions: w.sessions.filter(s => s.id !== id) }
+          : w
+        ));
+        // Don't leave the selection pointing at a session that no longer exists.
+        setActiveSessionId(current => current === id ? null : current);
+      }
+
       if (data.type === "message-added") {
         const { sessionId, message } = data.payload;
         setWorkspaces(ws => ws.map(w => ({
@@ -129,14 +139,90 @@ function Sidebar() {
   </div>
 }
 
+/**
+ * Modal confirmation for destructive actions. Cancel is autofocused so a stray
+ * Enter dismisses rather than destroys, and Escape / backdrop click both cancel.
+ */
+function ConfirmDialog({ title, body, confirmLabel, onConfirm, onCancel }: {
+  title: string,
+  body: string,
+  confirmLabel: string,
+  onConfirm: () => void,
+  onCancel: () => void
+}) {
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onCancel]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      onClick={onCancel}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="w-full max-w-sm rounded-lg border border-neutral-700 bg-neutral-900 p-4 shadow-xl"
+        // The backdrop closes on click; clicks inside the panel must not bubble to it.
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="text-sm font-medium text-neutral-100">{title}</div>
+        <p className="mt-2 text-sm text-neutral-400">{body}</p>
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            autoFocus
+            className="rounded px-3 py-1.5 text-sm text-neutral-300 hover:bg-neutral-800"
+            onClick={onCancel}
+          >
+            Cancel
+          </button>
+          <button
+            className="rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-500"
+            onClick={onConfirm}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function WorkspaceItem({ workspace, open, onToggle }: {
   workspace: Workspace,
   open: boolean,
   onToggle: () => void
 }) {
   const { socket, activeSessionId, setActiveSessionId } = useContext(AppContext);
+  const [pendingDelete, setPendingDelete] = useState<
+    { id: string, label: string, count: number } | null
+  >(null);
 
   return <div className="mb-1">
+    {pendingDelete && (
+      <ConfirmDialog
+        title={`Delete ${pendingDelete.label}?`}
+        body={
+          pendingDelete.count > 0
+            ? `This permanently removes ${pendingDelete.count} message${pendingDelete.count === 1 ? "" : "s"} and the agent's saved history for this session. It cannot be undone.`
+            : "This permanently removes the session and the agent's saved history for it. It cannot be undone."
+        }
+        confirmLabel="Delete"
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => {
+          socket.send(JSON.stringify({
+            type: "delete-session",
+            payload: { sessionId: pendingDelete.id }
+          }));
+          setPendingDelete(null);
+        }}
+      />
+    )}
     <button
       className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-neutral-800"
       onClick={onToggle}
@@ -154,20 +240,34 @@ function WorkspaceItem({ workspace, open, onToggle }: {
     {open && (
       <div className="mt-0.5 ml-3 border-l border-neutral-800 pl-2">
         {workspace.sessions.map((s, i) => (
-          <button
+          // Row rather than a single button: a delete control can't be nested
+          // inside the select button.
+          <div
             key={s.id}
-            className={`block w-full truncate rounded px-2 py-1 text-left text-sm ${
+            className={`group flex items-center rounded ${
               s.id === activeSessionId
                 ? "bg-neutral-700 text-neutral-100"
                 : "text-neutral-400 hover:bg-neutral-800"
             }`}
-            onClick={() => setActiveSessionId(s.id)}
           >
-            Session {i + 1}
-            <span className="ml-1.5 text-xs text-neutral-600">
-              {s.messages.length > 0 && `· ${s.messages.length}`}
-            </span>
-          </button>
+            <button
+              className="min-w-0 flex-1 truncate px-2 py-1 text-left text-sm"
+              onClick={() => setActiveSessionId(s.id)}
+            >
+              Session {i + 1}
+              <span className="ml-1.5 text-xs text-neutral-600">
+                {s.messages.length > 0 && `· ${s.messages.length}`}
+              </span>
+            </button>
+            <button
+              className="px-2 py-1 text-sm text-neutral-600 opacity-0 group-hover:opacity-100 hover:text-red-400 focus:opacity-100 cursor-pointer"
+              title="Delete session"
+              aria-label={`Delete session ${i + 1}`}
+              onClick={() => setPendingDelete({ id: s.id, label: `Session ${i + 1}`, count: s.messages.length })}
+            >
+              ×
+            </button>
+          </div>
         ))}
         <button
           className="mt-0.5 block w-full rounded px-2 py-1 text-left text-sm text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300"
