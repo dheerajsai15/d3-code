@@ -199,14 +199,18 @@ export class User{
       
       const workspacePath = workspace.path!;
 
+      // "default" (and an absent model) means: don't pass one, let the CLI pick.
+      const model = data.model && data.model !== "default" ? data.model : undefined;
+
       // Agentic loop: streams messages as Claude works
       for await (const sdkMessage of query({
         prompt: data.message,
         options: {
           cwd: workspacePath,
+          model,
           allowedTools: ["Read", "Edit", "Glob"], // Auto-approve these tools
           resume: session.anthropicSessionId ?? undefined,
-          permissionMode: "acceptEdits" // Auto-approve file edits
+          permissionMode: "auto" // Auto-approve file edits
         }
       })) {
         // Print human-readable output

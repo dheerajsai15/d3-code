@@ -2,6 +2,8 @@ import { useContext, useEffect, useMemo, useState } from 'react';
 import { AppContext } from './context/AppContext';
 import { useSocket } from './hooks/useSocket'
 import { Markdown } from './components/Markdown';
+// Subpath import: keeps zod (pulled in by the commons schemas) out of the bundle.
+import { MODELS, type ModelType } from 'commons/models';
 import type { Workspace } from 'commons';
 
 function App() {
@@ -184,6 +186,7 @@ function WorkspaceItem({ workspace, open, onToggle }: {
 function Chat() {
   const { socket, workspaces, setWorkspaces, activeSessionId } = useContext(AppContext);
   const [draft, setDraft] = useState("");
+  const [model, setModel] = useState<ModelType>("default");
 
   const active = useMemo(() => {
     for (const w of workspaces) {
@@ -219,7 +222,7 @@ function Chat() {
     
     socket.send(JSON.stringify({
       type: "add-message",
-      payload: { sessionId: active.session.id, message: draft.trim() }
+      payload: { sessionId: active.session.id, message: text, model }
     }));
     setDraft("");
   };
@@ -261,6 +264,16 @@ function Chat() {
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && send()}
         />
+        <select
+          className="rounded border border-neutral-700 bg-neutral-900 px-2 py-2 text-sm text-neutral-300 focus:border-neutral-500 focus:outline-none"
+          value={model}
+          onChange={(e) => setModel(e.target.value as ModelType)}
+          title="Model"
+        >
+          {MODELS.map(m => (
+            <option key={m.value} value={m.value}>{m.label}</option>
+          ))}
+        </select>
         <button
           className="rounded bg-neutral-100 px-4 text-sm font-medium text-neutral-900 hover:bg-white disabled:opacity-40"
           disabled={!draft.trim()}

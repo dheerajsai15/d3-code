@@ -1,4 +1,5 @@
 import z from "zod";
+import { MODEL_VALUES } from "./models";
 
 export const CreateWorkspaceSchema = z.object({
   path: z.string()
@@ -10,9 +11,14 @@ export const CreateSessionSchema = z.object({
 })
 export type CreateSessionSchemaType = z.infer<typeof CreateSessionSchema>
 
+export const ModelSchema = z.enum(MODEL_VALUES)
+
 export const AddMessageSchema = z.object({
   sessionId: z.string(),
-  message: z.string()
+  message: z.string(),
+  // Optional so older clients (and any message sent before a model is picked)
+  // keep working; absent means "default".
+  model: ModelSchema.optional()
 })
 export type AddMessageSchemaType = z.infer<typeof AddMessageSchema>
 
