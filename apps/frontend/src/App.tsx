@@ -1,4 +1,4 @@
-import { useContext, useEffect, useMemo, useState } from 'react';
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AppContext } from './context/AppContext';
 import { useSocket } from './hooks/useSocket'
 import { Markdown } from './components/Markdown';
@@ -288,13 +288,25 @@ function Chat() {
   const [draft, setDraft] = useState("");
   const [model, setModel] = useState<ModelType>("default");
 
-  const active = useMemo(() => {
-    for (const w of workspaces) {
-      const session = w.sessions.find(s => s.id === activeSessionId);
-      if (session) return { workspace: w, session };
-    }
-    return null;
-  }, [workspaces, activeSessionId]);
+  const workspace = workspaces.find(w => w.sessions.some(s => s.id === activeSessionId));
+  const session = workspace?.sessions.find(s => s.id === activeSessionId);
+  const active = workspace && session ? { workspace, session } : null;
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const lastSessionId = useRef<string | null>(null);
+  const sessionId = active?.session.id ?? null;
+  const messageCount = active?.session.messages.length ?? 0;
+
+  // Keep the newest message in view. Jump straight to the bottom when switching
+  // sessions; glide when a message lands in the session already open. Runs as a
+  // layout effect so a switched-to session never paints scrolled to the top.
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    const switched = lastSessionId.current !== sessionId;
+    lastSessionId.current = sessionId;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: switched ? "auto" : "smooth" });
+  }, [sessionId, messageCount]);
 
   if (!active) {
     return <div className="flex flex-1 items-center justify-center text-sm text-neutral-600">
@@ -333,7 +345,7 @@ function Chat() {
       <div className="text-xs text-neutral-500">{active.workspace.path}</div>
     </div>
 
-    <div className="flex-1 space-y-3 overflow-y-auto px-5 py-4">
+    <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-5 py-4">
       {active.session.messages.length === 0 && (
         <div className="pt-10 text-center text-sm text-neutral-600">
           No messages yet
