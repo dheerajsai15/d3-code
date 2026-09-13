@@ -1,4 +1,5 @@
 import z from "zod";
+import type { AgentType } from "./models";
 
 export const WorkspaceCreatedSchema = z.object({
   id: z.string(),
@@ -60,5 +61,6 @@ export type Workspace = {
 
 export type Session = {
   id: string,
+  agent: AgentType | null,
   messages: Message[]
 }

@@ -1,5 +1,5 @@
 import z from "zod";
-import { MODEL_VALUES } from "./models";
+import { AGENT_VALUES } from "./models";
 
 export const CreateWorkspaceSchema = z.object({
   path: z.string()
@@ -16,14 +16,13 @@ export const DeleteSessionSchema = z.object({
 })
 export type DeleteSessionSchemaType = z.infer<typeof DeleteSessionSchema>
 
-export const ModelSchema = z.enum(MODEL_VALUES)
+export const AgentSchema = z.enum(AGENT_VALUES)
 
 export const AddMessageSchema = z.object({
   sessionId: z.string(),
   message: z.string(),
-  // Optional so older clients (and any message sent before a model is picked)
-  // keep working; absent means "default".
-  model: ModelSchema.optional()
+  agent: AgentSchema,
+  model: z.string().optional()
 })
 export type AddMessageSchemaType = z.infer<typeof AddMessageSchema>
 

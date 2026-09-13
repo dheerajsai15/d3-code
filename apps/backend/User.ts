@@ -1,91 +1,7 @@
-import { AddMessageSchema, CreateSessionSchema, CreateWorkspaceSchema, DeleteSessionSchema, type IncomingMessageType, type Message, type OutgoingMessageType } from "commons";
+import { AddMessageSchema, CreateSessionSchema, CreateWorkspaceSchema, DeleteSessionSchema, isAgent, isModelFor, type IncomingMessageType, type Message, type OutgoingMessageType } from "commons";
 import { SessionModel, WorkspaceModel } from "db";
 import type { WebSocket } from "ws";
-import { deleteSession, query } from "@anthropic-ai/claude-agent-sdk";
-
-// Tool inputs come off the SDK typed as `unknown`, so every read is narrowed.
-function readString(input: Record<string, unknown>, key: string): string | undefined {
-  const value = input[key];
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function truncate(text: string, max = 80): string {
-  const oneLine = text.replace(/\s+/g, " ").trim();
-  return oneLine.length > max ? oneLine.slice(0, max - 1) + "…" : oneLine;
-}
-
-// Absolute paths inside the workspace are noise; show them relative to the root.
-function relativeToWorkspace(workspacePath: string, filePath: string): string {
-  const prefix = workspacePath.endsWith("/") ? workspacePath : workspacePath + "/";
-  return filePath.startsWith(prefix) ? filePath.slice(prefix.length) : filePath;
-}
-
-/**
- * Turns a tool_use block into something readable, e.g. `Read(src/App.tsx)`
- * or `Grep("useSocket" in apps/frontend)`. Falls back to the bare tool name
- * when the input has no argument worth showing.
- */
-function describeToolUse(name: string, input: unknown, workspacePath: string): string {
-  const args = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
-
-  const filePath = (key: string) => {
-    const value = readString(args, key);
-    return value === undefined ? undefined : relativeToWorkspace(workspacePath, value);
-  };
-
-  const detail = ((): string | undefined => {
-    switch (name) {
-      case "Read":
-      case "Write":
-      case "Edit":
-      case "NotebookEdit":
-        return filePath("file_path");
-
-      case "Glob": {
-        const pattern = readString(args, "pattern");
-        const path = filePath("path");
-        if (!pattern) return path;
-        return path ? `${pattern} in ${path}` : pattern;
-      }
-
-      case "Grep": {
-        const pattern = readString(args, "pattern");
-        const path = filePath("path");
-        if (!pattern) return path;
-        return path ? `"${pattern}" in ${path}` : `"${pattern}"`;
-      }
-
-      case "Bash": {
-        const command = readString(args, "command");
-        return command ? truncate(command) : readString(args, "description");
-      }
-
-      case "WebFetch":
-        return readString(args, "url");
-
-      case "WebSearch":
-        return readString(args, "query");
-
-      case "Task":
-        return readString(args, "description") ?? readString(args, "subagent_type");
-
-      case "TodoWrite": {
-        const todos = args.todos;
-        return Array.isArray(todos) ? `${todos.length} items` : undefined;
-      }
-
-      default: {
-        // Unknown or MCP tool: show the first string argument, whatever it is.
-        for (const value of Object.values(args)) {
-          if (typeof value === "string" && value.length > 0) return truncate(value);
-        }
-        return undefined;
-      }
-    }
-  })();
-
-  return detail ? `${name}(${detail})` : name;
-}
+import { agents, HISTORY_ID_FIELD } from "./agents";
 
 export class User{
   private socket: WebSocket;
@@ -171,8 +87,6 @@ export class User{
       if (!success)
         throw new Error("Incorrect Schema")
 
-      // Read it first: the response needs the workspace it belonged to, and the
-      // agent transcript can only be located via anthropicSessionId.
       const session = await SessionModel.findById(data.sessionId);
 
       if (!session)
@@ -183,16 +97,16 @@ export class User{
       if (!workspaceId)
         throw new Error("Session has no workspace " + data.sessionId);
 
-      // Anthropic stores no history server-side — the agent SDK keeps it in a
-      // local JSONL transcript, so dropping only the Mongo document would
-      // orphan that file (plus any subagent transcripts) forever.
-      if (session.anthropicSessionId) {
+      const agent = isAgent(session.agent) ? session.agent : null;
+      const historyId = agent ? session[HISTORY_ID_FIELD[agent]] : undefined;
+
+      if (agent && historyId) {
         try {
-          await deleteSession(session.anthropicSessionId);
+          await agents[agent].deleteHistory(historyId);
         } catch (e) {
           // Throws when the transcript is already gone. Not a reason to leave
           // the session in the database.
-          console.warn(`No transcript to delete for ${session.anthropicSessionId}`);
+          console.warn(`No ${agent} transcript to delete for ${historyId}`);
         }
       }
 
@@ -230,62 +144,40 @@ export class User{
         throw new Error("Workspace doesn't exist ")
       }
 
-      const result = await SessionModel.updateOne(
-        { _id: data.sessionId },
-        { $push: { conversation: message } }
-      );
+      const { agent } = data;
 
-      if (result.matchedCount === 0)
-        throw new Error("No such session");
-      
-      const workspacePath = workspace.path!;
+      if (session.agent && session.agent !== agent)
+        throw new Error(`Session ${data.sessionId} uses the ${session.agent} agent`);
 
       // "default" (and an absent model) means: don't pass one, let the CLI pick.
       const model = data.model && data.model !== "default" ? data.model : undefined;
 
-      // Agentic loop: streams messages as Claude works
-      for await (const sdkMessage of query({
+      if (model && !isModelFor(agent, model))
+        throw new Error(`Model ${model} isn't available for the ${agent} agent`);
+
+      const result = await SessionModel.updateOne(
+        { _id: data.sessionId },
+        { $push: { conversation: message }, $set: { agent } }
+      );
+
+      if (result.matchedCount === 0)
+        throw new Error("No such session");
+
+      const historyField = HISTORY_ID_FIELD[agent];
+
+      await agents[agent].run({
         prompt: data.message,
-        options: {
-          cwd: workspacePath,
-          model,
-          allowedTools: ["Read", "Edit", "Glob"], // Auto-approve these tools
-          resume: session.anthropicSessionId ?? undefined,
-          permissionMode: "auto" // Auto-approve file edits
-        }
-      })) {
-        // Print human-readable output
-        if (sdkMessage.type === "assistant" && sdkMessage.message?.content) {
-          for (const block of sdkMessage.message.content) {
-            if (block.type === "text") {
-              console.log(block.text); // Claude's reasoning
-            } else if (
-              block.type === "tool_use" ||
-              block.type === "server_tool_use" ||
-              block.type === "mcp_tool_use"
-            ) {
-              // e.g. `Read(src/App.tsx)` rather than a bare `Read`
-              const description = describeToolUse(block.name, block.input, workspacePath);
-              console.log(`Tool: ${description}`);
-
-              await this.recordAssistantMessage(data.sessionId, `Tool: ${description}`);
-            }
-          }
-        }
-        else if (sdkMessage.type === "result") {
-          console.log(`Done: ${sdkMessage.subtype}`); // Final result
-
-          if (!session.anthropicSessionId) {
-            session.anthropicSessionId = sdkMessage.session_id;
-            await session.save();
-          }
-
-          if (sdkMessage.subtype === "success") {
-            console.log(sdkMessage.result);
-            await this.recordAssistantMessage(data.sessionId, sdkMessage.result);
-          }
-        }
-      }
+        cwd: workspace.path!,
+        model,
+        resumeId: session[historyField] ?? undefined,
+        onSessionId: async (id) => {
+          await SessionModel.updateOne(
+            { _id: data.sessionId },
+            { $set: { [historyField]: id } }
+          );
+        },
+        onMessage: (text) => this.recordAssistantMessage(data.sessionId, text)
+      });
 
       return {
         type: "message-added",

@@ -3,7 +3,7 @@ import { AppContext } from './context/AppContext';
 import { useSocket } from './hooks/useSocket'
 import { Markdown } from './components/Markdown';
 // Subpath import: keeps zod (pulled in by the commons schemas) out of the bundle.
-import { MODELS, type ModelType } from 'commons/models';
+import { AGENTS, MODELS, isModelFor, type AgentType } from 'commons/models';
 import type { Workspace } from 'commons';
 
 function App() {
@@ -28,7 +28,7 @@ function App() {
       if (data.type === "session-created") {
         const { id, workspaceId } = data.payload;
         setWorkspaces(ws => ws.map(w => w.id === workspaceId
-          ? { ...w, sessions: [...w.sessions, { id, messages: [] }] }
+          ? { ...w, sessions: [...w.sessions, { id, agent: null, messages: [] }] }
           : w
         ));
         setActiveSessionId(id);
@@ -286,7 +286,8 @@ function WorkspaceItem({ workspace, open, onToggle }: {
 function Chat() {
   const { socket, workspaces, setWorkspaces, activeSessionId } = useContext(AppContext);
   const [draft, setDraft] = useState("");
-  const [model, setModel] = useState<ModelType>("default");
+  const [agentChoice, setAgentChoice] = useState<AgentType>("anthropic");
+  const [model, setModel] = useState("default");
 
   const workspace = workspaces.find(w => w.sessions.some(s => s.id === activeSessionId));
   const session = workspace?.sessions.find(s => s.id === activeSessionId);
@@ -297,9 +298,6 @@ function Chat() {
   const sessionId = active?.session.id ?? null;
   const messageCount = active?.session.messages.length ?? 0;
 
-  // Keep the newest message in view. Jump straight to the bottom when switching
-  // sessions; glide when a message lands in the session already open. Runs as a
-  // layout effect so a switched-to session never paints scrolled to the top.
   useLayoutEffect(() => {
     const el = scrollRef.current;
     const switched = lastSessionId.current !== sessionId;
@@ -314,6 +312,11 @@ function Chat() {
     </div>
   }
 
+  const agent = active.session.agent ?? agentChoice;
+  const agentLocked = active.session.agent !== null;
+  // After switching sessions the remembered model may belong to the other agent.
+  const sessionModel = isModelFor(agent, model) ? model : "default";
+
   const send = () => {
     if (!draft.trim()) return;
     const text = draft.trim();
@@ -323,6 +326,7 @@ function Chat() {
       sessions: w.sessions.map(s => s.id === active.session.id
         ? {
           ...s,
+          agent,
           messages: [...s.messages, {
             role: "user", payload: {
               message: text
@@ -334,7 +338,7 @@ function Chat() {
     
     socket.send(JSON.stringify({
       type: "add-message",
-      payload: { sessionId: active.session.id, message: text, model }
+      payload: { sessionId: active.session.id, message: text, agent, model: sessionModel }
     }));
     setDraft("");
   };
@@ -377,12 +381,23 @@ function Chat() {
           onKeyDown={(e) => e.key === "Enter" && send()}
         />
         <select
+          className="rounded border border-neutral-700 bg-neutral-900 px-2 py-2 text-sm text-neutral-300 focus:border-neutral-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+          value={agent}
+          onChange={(e) => setAgentChoice(e.target.value as AgentType)}
+          disabled={agentLocked}
+          title={agentLocked ? "Start a new session to use a different agent" : "Agent"}
+        >
+          {AGENTS.map(a => (
+            <option key={a.value} value={a.value}>{a.label}</option>
+          ))}
+        </select>
+        <select
           className="rounded border border-neutral-700 bg-neutral-900 px-2 py-2 text-sm text-neutral-300 focus:border-neutral-500 focus:outline-none"
-          value={model}
-          onChange={(e) => setModel(e.target.value as ModelType)}
+          value={sessionModel}
+          onChange={(e) => setModel(e.target.value)}
           title="Model"
         >
-          {MODELS.map(m => (
+          {MODELS[agent].map(m => (
             <option key={m.value} value={m.value}>{m.label}</option>
           ))}
         </select>

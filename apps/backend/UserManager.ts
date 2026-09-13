@@ -2,7 +2,7 @@ import type { WebSocket } from "ws"
 import { User } from "./User";
 import { uuid } from "uuidv4";
 import { SessionModel, WorkspaceModel } from "db";
-import type { Message, Session, Workspace } from "commons";
+import { isAgent, type Message, type Session, type Workspace } from "commons";
 
 export class UserManager{
   private users: User[];
@@ -36,6 +36,7 @@ export class UserManager{
         if (s.workspace?.equals(w._id)) {
           sesArr.push({
             id: s._id.toString(),
+            agent: isAgent(s.agent) ? s.agent : null,
             messages: (s.conversation ?? []) as Message[]
           })
         }

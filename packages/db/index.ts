@@ -8,7 +8,10 @@ export const Workspace = new mongoose.Schema({
 export const Session = new mongoose.Schema({
   conversation: [Schema.Types.Mixed],
   workspace: { type: Schema.Types.ObjectId, ref: 'Workspace' },
-  anthropicSessionId: String
+  // "anthropic" | "openai", set by the first message.
+  agent: String,
+  anthropicSessionId: String,
+  openaiThreadId: String
 });
 
 export const SessionModel = mongoose.model("Session", Session);

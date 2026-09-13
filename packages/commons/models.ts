@@ -1,20 +1,34 @@
-/**
- * Selectable models, shared by the composer dropdown and the backend validator.
- *
- * These are aliases rather than dated ids ("claude-sonnet-5"): the agent SDK
- * resolves an alias to the current version of that family, so this list does
- * not go stale. "default" means "pass no model and let the CLI decide".
- *
- * Deliberately free of zod imports so the frontend can pull it in via
- * `commons/models` without bundling a validation library it never runs.
- */
-export const MODEL_VALUES = ["default", "opus", "sonnet", "haiku"] as const;
+export const AGENT_VALUES = ["anthropic", "openai"] as const;
 
-export type ModelType = (typeof MODEL_VALUES)[number];
+export type AgentType = (typeof AGENT_VALUES)[number];
 
-export const MODELS: { value: ModelType; label: string }[] = [
-  { value: "default", label: "Default" },
-  { value: "opus", label: "Opus" },
-  { value: "sonnet", label: "Sonnet" },
-  { value: "haiku", label: "Haiku" }
+export const AGENTS: { value: AgentType; label: string }[] = [
+  { value: "anthropic", label: "Anthropic" },
+  { value: "openai", label: "OpenAI" }
 ];
+
+export type ModelOption = { value: string; label: string };
+
+export const MODELS: Record<AgentType, ModelOption[]> = {
+  anthropic: [
+    { value: "default", label: "Default" },
+    { value: "opus", label: "Opus" },
+    { value: "sonnet", label: "Sonnet" },
+    { value: "haiku", label: "Haiku" }
+  ],
+  openai: [
+    { value: "default", label: "Default" },
+    { value: "gpt-6-astra", label: "GPT-6 Astra" },
+    { value: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
+    { value: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
+    { value: "gpt-5.6-luna", label: "GPT-5.6 Luna" }
+  ]
+};
+
+export function isAgent(value: unknown): value is AgentType {
+  return AGENT_VALUES.includes(value as AgentType);
+}
+
+export function isModelFor(agent: AgentType, model: string): boolean {
+  return MODELS[agent].some(m => m.value === model);
+}
